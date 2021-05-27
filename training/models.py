@@ -173,7 +173,6 @@ class CorrFilter(torch.autograd.Function):
         a_f = torch.mul(y_f, 1/k_f) / n
         w_f = torch.mul(torch.unsqueeze(torch.conj(a_f), 1), x_f)
         w = torch.real(ifft2(w_f))
-        print('w:', w.shape)
 
         return w
 
@@ -185,6 +184,7 @@ class CFblock(nn.Module):
         self.in_sz = in_sz
         self.sigma = 1
         self.lambd = 10 # regularization for cf
+        self.crop_margin = 16
         self.window = self.generate_window()
         self.cf_target = get_gaussian_kernel2d((in_sz, in_sz), (self.sigma, self.sigma)).to(device)
         self.corr_filter = CorrFilter.apply
@@ -202,6 +202,8 @@ class CFblock(nn.Module):
         print('inx shape:', x.shape, self.window.shape)
         x = torch.mul(x, self.window)
         x = self.corr_filter(x, self.cf_target, self.lambd)
+        print('postcorr:', x.shape)
+        x = x[:, :, self.crop_margin:-self.crop_margin, self.crop_margin:-self.crop_margin]
         print('outx shape:', x.shape)
 
         return x
@@ -237,6 +239,9 @@ class CFnet(nn.Module):
         else:
             self.upscale_factor = self.stride
 
+        self.CFscale = nn.Parameter(torch.tensor(1.0))
+        self.CFbias = nn.Parameter(torch.tensor(-0.5))
+
 
     def forward(self, x1, x2):
         """
@@ -251,14 +256,15 @@ class CFnet(nn.Module):
         """
         embedding_reference = self.embedding_net(x1)
         cf_template = self.cf_block(embedding_reference)
+        cf_template = torch.mul(self.CFscale, cf_template) + self.CFbias
 
         embedding_search = self.embedding_net(x2)
-        match_map = self.match_corr(embedding_reference, embedding_search)
+        match_map = self.match_corr(cf_template, embedding_search)
         return match_map
 
 
-    def get_embedding(self, x):
-        return self.embedding_net(x)
+    # def get_embedding(self, x):
+    #     return self.embedding_net(x)
 
 
     def match_corr(self, embed_ref, embed_srch):
