@@ -6,6 +6,7 @@ networks.
 """
 import math
 import matplotlib.pyplot as plt
+import sys
 
 import torch
 import torch.nn as nn
@@ -190,6 +191,19 @@ class CFblock(nn.Module):
         self.corr_filter = CorrFilter.apply
 
 
+    def corr_filter_xd(self, x, cf_target, lambd):
+
+        n = cf_target.shape[0] * cf_target.shape[1]
+        x_f = fft2(x)
+        y_f = fft2(cf_target)
+        k_f = lambd + torch.sum( torch.mul(torch.conj(x_f), x_f), 1 ) / n
+        a_f = torch.mul(y_f, 1/k_f) / n
+        w_f = torch.mul(torch.unsqueeze(torch.conj(a_f), 1), x_f)
+        w = torch.real(ifft2(w_f))
+
+        return w
+
+
     def generate_window(self):
         onedim_win = torch.hann_window(self.in_sz, periodic=False)
         twodim_win = torch.mul(onedim_win.view(-1, 1), onedim_win.view(1, -1)).to(device)
@@ -199,12 +213,9 @@ class CFblock(nn.Module):
     
     def forward(self, x):
 
-        print('inx shape:', x.shape, self.window.shape)
         x = torch.mul(x, self.window)
-        x = self.corr_filter(x, self.cf_target, self.lambd)
-        print('postcorr:', x.shape)
+        x = self.corr_filter_xd(x, self.cf_target, self.lambd)
         x = x[:, :, self.crop_margin:-self.crop_margin, self.crop_margin:-self.crop_margin]
-        print('outx shape:', x.shape)
 
         return x
 
@@ -263,8 +274,18 @@ class CFnet(nn.Module):
         return match_map
 
 
-    # def get_embedding(self, x):
-    #     return self.embedding_net(x)
+    def get_template_embedding(self, x):
+        embedding_reference = self.embedding_net(x)
+        cf_template = self.cf_block(embedding_reference)
+        cf_template = torch.mul(self.CFscale, cf_template) + self.CFbias
+       
+
+        return cf_template
+
+
+    def get_search_embedding(self, x):
+
+        return self.embedding_net(x)
 
 
     def match_corr(self, embed_ref, embed_srch):
@@ -351,6 +372,12 @@ class SiameseNet(nn.Module):
         return match_map
 
     def get_embedding(self, x):
+        return self.embedding_net(x)
+
+    def get_template_embedding(self, x):
+        return self.embedding_net(x)
+
+    def get_search_embedding(self, x):
         return self.embedding_net(x)
 
     def match_corr(self, embed_ref, embed_srch):

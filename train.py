@@ -2,6 +2,7 @@
 import argparse
 import logging
 from os.path import dirname, abspath, join, isfile
+import sys
 
 import numpy as np
 import torch
@@ -51,7 +52,7 @@ def parse_arguments():
                         choices=imutils.VALID_FLAGS,
                         help="Optional, the flag of the image_utils defining "
                         "the image processing tools.")
-    parser.add_argument('-s', '--summary_samples', default=5, type=int,
+    parser.add_argument('-s', '--summary_samples', default=0, type=int,
                         help="Optional, the number of pairs the TensorboardX "
                         "samples during validation to write in the summary. "
                         "For each epoch it saves the ref and the search "
@@ -105,6 +106,7 @@ def main(args):
     summ_maker = SummaryMaker(join(exp_dir, 'tensorboard'),
                               params,
                               model.upscale_factor)
+    # summ_maker = None
 
     label_function = create_BCELogit_loss_label
     img_read_fcn = imutils.get_decode_jpeg_fcn(flag=args.imutils_flag)
@@ -442,10 +444,10 @@ def evaluate(model, loss_fn, dataloader, metrics, params, args, summ_maker=None)
             timer.reset()
 
             # compute model output
-            # embed_ref = model.get_embedding(ref_img_batch)
-            # embed_srch = model.get_embedding(search_batch)
-            # output_batch = model.match_corr(embed_ref, embed_srch)
-            output_batch = model(ref_img_batch, search_batch)
+            embed_ref = model.get_template_embedding(ref_img_batch)
+            embed_srch = model.get_search_embedding(search_batch)
+            output_batch = model.match_corr(embed_ref, embed_srch)
+            # output_batch = model(ref_img_batch, search_batch)
 
             loss = loss_fn(output_batch, labels_batch)
             # Make a TensorBoardX summary for the number of pairs informed by
@@ -469,10 +471,18 @@ def evaluate(model, loss_fn, dataloader, metrics, params, args, summ_maker=None)
                                                      seq_name,
                                                      first_frame)
 
+                    print(embed_ref[0])
+                    # embed_ref = torch.rand([8, 32, 17, 17]).to(device)
+                    # ref_img_batch = torch.rand([8, 3, 127, 127]).to(device)
+                    print('embed ref:', embed_ref.shape, embed_ref.dtype)
+                    print('ref_img_batch:', ref_img_batch.shape, ref_img_batch.dtype)
                     summ_maker.add_overlay("Ref_image_{}".format(index_string),
                                            embed_ref[batch_index],
                                            ref_img_batch[batch_index],
                                            cmap='inferno')
+                    torch.cuda.synchronize()
+                    print('kupal')
+                    sys.exit()
                     summ_maker.add_overlay("Search_image_{}".format(index_string),
                                            embed_srch[batch_index],
                                            search_batch[batch_index],
