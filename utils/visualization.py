@@ -9,6 +9,63 @@ else:
 import matplotlib.patches as patches
 
 
+def plot_training_results(results_filepath, output_path):
+
+    val_losses = []
+    train_losses = []
+    val_aucs = []
+    train_aucs = []
+    val_center_errors = []
+    train_center_errors = []
+
+    with open(results_filepath, 'r') as results_file:
+        file_lines = results_file.readlines()
+        for line in file_lines:
+            linedata = line.split(' ; ')
+            linedata = [data.split()[1] for data in linedata]
+            val_losses.append(float(linedata[5]))
+            train_losses.append(float(linedata[2]))
+            val_aucs.append(float(linedata[3]))
+            train_aucs.append(float(linedata[0]))
+            val_center_errors.append(float(linedata[4]))
+            train_center_errors.append(float(linedata[1]))
+
+    epochs = range(len(val_losses))
+
+    # for line_idx, line in enumerate(file_lines):
+    #     if 'Training results:' in line:
+    #         lineidx_to_read_from = line_idx + 1
+    #         break
+    
+    # for line_idx in range(lineidx_to_read_from, len(file_lines)):
+    #     linedata = file_lines[line_idx].split()
+        
+    plt.figure(figsize=(10, 10))
+
+    plt.subplot(311)
+    plt.plot(epochs, train_losses, 'orange', epochs, val_losses, 'b')
+    plt.xlabel('epoch')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.legend(['train_loss', 'val_loss'])
+
+    plt.subplot(312)
+    plt.plot(epochs, train_aucs, 'orange', epochs, val_aucs, 'b')
+    plt.ylabel('AUC')
+    plt.xlabel('epoch')
+    plt.grid(True)
+    plt.legend(['train_auc', 'val_auc'])
+
+    plt.subplot(313)
+    plt.plot(epochs, train_center_errors, 'orange', epochs, val_center_errors, 'b')
+    plt.ylabel('Center Error')
+    plt.xlabel('epoch')
+    plt.grid(True)
+    plt.legend(['train_auc', 'val_auc'])
+
+    plt.savefig(os.path.join(output_path, 'training_results.png'))
+
+
 def show_frame(frame, bbox, fig_n, pause=2):
     plt.ion()
     plt.clf()

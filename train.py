@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import os
 from os.path import dirname, abspath, join, isfile
 import sys
 
@@ -21,9 +22,15 @@ from training.train_utils import RunningAverage
 from utils.profiling import Timer
 from utils.exceptions import IncompleteArgument
 import utils.image_utils as imutils
+from utils.visualization import plot_training_results
 
 device = torch.device("cuda") if torch.cuda.is_available() \
     else torch.device("cpu")
+
+
+RESUME_CHECKPOINT = 'last'
+DATASET_DIR = ''
+EXPERIMENT_NAME = 'default'
 
 
 def parse_arguments():
@@ -32,13 +39,13 @@ def parse_arguments():
                         help="The mode of execution of the script. Options are "
                         "'train' to train a model, and 'eval' to evaluate a model "
                         "on the ImageNet eval dataset.")
-    parser.add_argument('-d', '--data_dir', default='/home/ml2/workspace_rafael/dummy_Imagenet',
+    parser.add_argument('-d', '--data_dir', default=DATASET_DIR,
                         help="Full path to the directory containing the dataset")
-    parser.add_argument('-e', '--exp_name', default='default',
+    parser.add_argument('-e', '--exp_name', default=EXPERIMENT_NAME,
                         help="The name of the experiment folder that contains the "
                              "parameters, checkpoints and logs. Must be in "
                              "training/experiments")
-    parser.add_argument('-r', '--restore_file', default=None,
+    parser.add_argument('-r', '--restore_file', default=RESUME_CHECKPOINT,
                         help="Optional, name of file to restore from (without its"
                              "extension .pth.tar)")
     parser.add_argument("-t", "--timer", action="store_true", dest="timer",
@@ -260,14 +267,17 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, sched
         to a tensorboard-readable file.
     """
     # reload weights from restore_file if specified
-    # TODO load and set best validation error
     if args.restore_file is not None:
         restore_path = join(exp_dir, (args.restore_file + '.pth.tar'))
         logging.info("Restoring parameters from {}".format(restore_path))
-        train_utils.load_checkpoint(restore_path, model)
-
-    # best_val_c_error = float("inf")
-    best_val_auc = 0
+        checkpoint_dict = train_utils.load_checkpoint(restore_path, model)
+        with open(join(exp_dir, 'results.txt'), 'w') as results_file:
+            results_file.write(checkpoint_dict['results_string'])
+        best_val_auc = checkpoint_dict['best_val_auc']
+    else:
+        os.remove(join(exp_dir, 'results.txt'))
+        best_val_auc = 0
+    print('BEST_VAL_ACU:', best_val_auc)
     # Before starting the first epoch do the eval
     logging.info('Pretraining evaluation...')
     # Epoch 0 is the validation epoch before the learning starts.
@@ -282,8 +292,8 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, sched
         logging.info("Epoch {}/{}".format(epoch + 1, params.num_epochs))
 
         # compute number of batches in one epoch (one full pass over the training set)
-        train(model, optimizer, loss_fn, train_dataloader, metrics, params,
-              summ_maker=summ_maker)
+        train_metrics_string = train(model, optimizer, loss_fn, train_dataloader, metrics, params,
+                                summ_maker=summ_maker)
 
         # Update the Learning rate
         scheduler.step()
@@ -295,12 +305,13 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, sched
         val_auc = val_metrics['AUC']
         is_best = val_auc >= best_val_auc
 
-        # Save weights
-        train_utils.save_checkpoint({'epoch': epoch + 1,
-                                     'state_dict': model.state_dict(),
-                                     'optim_dict': optimizer.state_dict()},
-                                    is_best=is_best,
-                                    checkpoint=exp_dir)
+        val_metrics_string = " ; ".join("{}: {:05.3f}".format('val_'+k, v)
+                                for k, v in val_metrics.items())
+        results_string = train_metrics_string + ' ; ' + val_metrics_string
+        with open(join(exp_dir, 'results.txt'), 'a') as results_file:
+            results_file.write(results_string + '\n')
+        
+        plot_training_results(join(exp_dir, 'results.txt'), exp_dir)
 
         # If best_eval, best_save_path
         if is_best:
@@ -315,6 +326,16 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, sched
         # Save latest val metrics in a json file in the model directory
         last_json_path = join(exp_dir, "metrics_val_last_weights.json")
         train_utils.save_dict_to_json(val_metrics, last_json_path)
+
+        # Save weights
+        with open(join(exp_dir, 'results.txt'), 'r') as results_file:     
+            train_utils.save_checkpoint({'epoch': epoch + 1,
+                                        'state_dict': model.state_dict(),
+                                        'optim_dict': optimizer.state_dict(),
+                                        'best_val_auc': best_val_auc,
+                                        'results_string': results_file.read()},
+                                        is_best=is_best,
+                                        checkpoint=exp_dir)
 
 
 def train(model, optimizer, loss_fn, dataloader, metrics, params,
@@ -401,6 +422,8 @@ def train(model, optimizer, loss_fn, dataloader, metrics, params,
         logging.info("[profiling][train] Mean load_data time: {}".format(profil_summ['load_data']()))
         logging.info("[profiling][train] Mean batch time: {}".format(profil_summ['batch']()))
 
+    return metrics_string
+
 
 @torch.no_grad()
 def evaluate(model, loss_fn, dataloader, metrics, params, args, summ_maker=None):
@@ -471,18 +494,15 @@ def evaluate(model, loss_fn, dataloader, metrics, params, args, summ_maker=None)
                                                      seq_name,
                                                      first_frame)
 
-                    print(embed_ref[0])
-                    # embed_ref = torch.rand([8, 32, 17, 17]).to(device)
-                    # ref_img_batch = torch.rand([8, 3, 127, 127]).to(device)
-                    print('embed ref:', embed_ref.shape, embed_ref.dtype)
-                    print('ref_img_batch:', ref_img_batch.shape, ref_img_batch.dtype)
+                    # print(embed_ref[0])
+                    # # embed_ref = torch.rand([8, 32, 17, 17]).to(device)
+                    # # ref_img_batch = torch.rand([8, 3, 127, 127]).to(device)
+                    # print('embed ref:', embed_ref.shape, embed_ref.dtype)
+                    # print('ref_img_batch:', ref_img_batch.shape, ref_img_batch.dtype)
                     summ_maker.add_overlay("Ref_image_{}".format(index_string),
                                            embed_ref[batch_index],
                                            ref_img_batch[batch_index],
                                            cmap='inferno')
-                    torch.cuda.synchronize()
-                    print('kupal')
-                    sys.exit()
                     summ_maker.add_overlay("Search_image_{}".format(index_string),
                                            embed_srch[batch_index],
                                            search_batch[batch_index],

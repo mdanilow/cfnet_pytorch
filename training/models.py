@@ -366,8 +366,6 @@ class SiameseNet(nn.Module):
         """
         embedding_reference = self.embedding_net(x1)
         embedding_search = self.embedding_net(x2)
-        print('ref:', embedding_reference.shape)
-        print('search:', embedding_search.shape)
         match_map = self.match_corr(embedding_reference, embedding_search)
         return match_map
 
