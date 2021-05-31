@@ -188,6 +188,8 @@ def main(args):
 
             logging.info("Done")
             logging.info("Setup time: {}".format(setup_timer.elapsed))
+            for k, v in model.named_parameters():
+                print(k)
             parameters = filter(lambda p: p.requires_grad,model.parameters())
             optimizer = optimz.OPTIMIZERS[params.optim](parameters, **params.optim_kwargs)
             # Set the scheduler, that updates the learning rate using a exponential
@@ -275,7 +277,8 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, sched
             results_file.write(checkpoint_dict['results_string'])
         best_val_auc = checkpoint_dict['best_val_auc']
     else:
-        os.remove(join(exp_dir, 'results.txt'))
+        if os.path.exists(join(exp_dir, 'results.txt')):
+            os.remove(join(exp_dir, 'results.txt'))
         best_val_auc = 0
     print('BEST_VAL_ACU:', best_val_auc)
     # Before starting the first epoch do the eval
