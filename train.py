@@ -28,7 +28,7 @@ device = torch.device("cuda") if torch.cuda.is_available() \
     else torch.device("cpu")
 
 
-RESUME_CHECKPOINT = 'last'
+RESUME_CHECKPOINT = None
 DATASET_DIR = ''
 EXPERIMENT_NAME = 'default'
 
