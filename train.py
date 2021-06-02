@@ -276,19 +276,21 @@ def train_and_evaluate(model, train_dataloader, val_dataloader, optimizer, sched
         with open(join(exp_dir, 'results.txt'), 'w') as results_file:
             results_file.write(checkpoint_dict['results_string'])
         best_val_auc = checkpoint_dict['best_val_auc']
+        start_epoch = checkpoint_dict['epoch']
     else:
         if os.path.exists(join(exp_dir, 'results.txt')):
             os.remove(join(exp_dir, 'results.txt'))
         best_val_auc = 0
+        start_epoch = 0
     print('BEST_VAL_ACU:', best_val_auc)
     # Before starting the first epoch do the eval
     logging.info('Pretraining evaluation...')
     # Epoch 0 is the validation epoch before the learning starts.
-    summ_maker.epoch = 0
+    summ_maker.epoch = start_epoch
     val_metrics = evaluate(model, loss_fn, val_dataloader, metrics, params, args,
                            summ_maker=summ_maker)
 
-    for epoch in range(params.num_epochs):
+    for epoch in range(start_epoch, params.num_epochs):
         # The first epoch after training is 1 not 0
         summ_maker.epoch = epoch + 1
         # Run one epoch
@@ -359,7 +361,6 @@ def train(model, optimizer, loss_fn, dataloader, metrics, params,
     """
     # set model to training mode
     model.train()
-    print('model type:', type(model))
 
     # summary for current training loop and a running average object for loss
     summ = {metric:RunningAverage() for metric in metrics}

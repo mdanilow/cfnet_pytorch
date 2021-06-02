@@ -174,8 +174,24 @@ class CorrFilter(torch.autograd.Function):
         a_f = torch.mul(y_f, 1/k_f) / n
         w_f = torch.mul(torch.unsqueeze(torch.conj(a_f), 1), x_f)
         w = torch.real(ifft2(w_f))
+        self.save_for_backward(x_f, a_f, k_f)
 
         return w
+
+    @staticmethod
+    def backward(self, grad_output):
+
+        x_f, a_f, k_f = self.saved_tensors
+        n = x_f.shape[2] * x_f.shape[3]
+        der_w_f = fft2(grad_output)
+        der_a_f = torch.sum( torch.mul(x_f, torch.conj(der_w_f)), 1)
+        der_x_f = torch.mul(torch.unsqueeze(a_f, 1), der_w_f)
+        
+        der_k_f = torch.mul(-der_a_f, torch.conj(a_f / k_f))
+        der_x_f = der_x_f + 2/n * torch.mul(torch.real(torch.unsqueeze(der_k_f, 1)), x_f)
+        der_x = torch.real(ifft2(der_x_f))
+
+        return der_x, None, None
 
 
 class CFblock(nn.Module):
@@ -214,7 +230,7 @@ class CFblock(nn.Module):
     def forward(self, x):
 
         x = torch.mul(x, self.window)
-        x = self.corr_filter_xd(x, self.cf_target, self.lambd)
+        x = self.corr_filter(x, self.cf_target, self.lambd)
         x = x[:, :, self.crop_margin:-self.crop_margin, self.crop_margin:-self.crop_margin]
 
         return x
