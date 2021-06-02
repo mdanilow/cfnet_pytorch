@@ -7,6 +7,8 @@ networks.
 import math
 import matplotlib.pyplot as plt
 import sys
+import numpy as np
+from os.path import join
 
 import torch
 import torch.nn as nn
@@ -14,6 +16,8 @@ import torch.nn.functional as F
 from torch.fft import fft2, ifft2
 from torch.nn.init import xavier_uniform_, constant_, zeros_, normal_
 from torchgeometry.image import get_gaussian_kernel2d
+
+TEST_PATH = '/home/magister/CF_tracking/cfnet_pytorch/tesciki'
 
 
 device = torch.device("cuda") if torch.cuda.is_available() \
@@ -199,11 +203,15 @@ class CFblock(nn.Module):
     def __init__(self, in_sz):
         super(CFblock, self).__init__()
         self.in_sz = in_sz
-        self.sigma = 1
+        self.sigma = 2
         self.lambd = 10 # regularization for cf
         self.crop_margin = 16
         self.window = self.generate_window()
-        self.cf_target = get_gaussian_kernel2d((in_sz, in_sz), (self.sigma, self.sigma)).to(device)
+        # self.cf_target = get_gaussian_kernel2d((in_sz, in_sz), (self.sigma, self.sigma)).to(device)
+        self.cf_target = self.generate_gaussian(self.in_sz, self.sigma).to(device)
+        # np.savetxt(join(TEST_PATH, 'targettorch.csv'), self.cf_target.cpu().detach(), delimiter=',')
+        # np.savetxt(join(TEST_PATH, 'windowtorch.csv'), self.window.cpu().detach(), delimiter=',')
+        # print('DONE')
         self.corr_filter = CorrFilter.apply
 
 
@@ -223,8 +231,20 @@ class CFblock(nn.Module):
     def generate_window(self):
         onedim_win = torch.hann_window(self.in_sz, periodic=False)
         twodim_win = torch.mul(onedim_win.view(-1, 1), onedim_win.view(1, -1)).to(device)
-        
+
         return twodim_win
+
+
+    def generate_gaussian(self, size, sigma):
+
+        xg, yg = np.meshgrid(range(size), range(size))
+        half = size // 2
+        xg = np.mod(xg + half, size) - half
+        yg = np.mod(yg + half, size) - half
+
+        y = np.exp(-(np.square(xg) + np.square(yg)) / (2 * sigma**2))
+        
+        return torch.tensor(y, dtype=torch.float32)
 
     
     def forward(self, x):
