@@ -260,7 +260,8 @@ class CFnet(nn.Module):
 
     def __init__(self, embedding_net, params, corr_map_size=33, stride=4):
         super(CFnet, self).__init__()
-        self.embedding_net = embedding_net
+        self.embedding_net_reference = embedding_net
+        self.embedding_net_search = embedding_net
         self.match_batchnorm = nn.BatchNorm2d(1)
         # TODO compute this shape!
         self.ref_feature_sz = 49
@@ -301,27 +302,27 @@ class CFnet(nn.Module):
             match_map (torch.Tensor): The score map for the pair. For the usual
                 input shapes, the output shape is [8, 1, 33, 33].
         """
-        embedding_reference = self.embedding_net(x1)
-        cf_template = self.cf_block(embedding_reference)
-        cf_template = torch.mul(self.CFscale, cf_template) + self.CFbias
+        # embedding_reference = self.embedding_net_reference(x1)
+        # cf_template = self.cf_block(embedding_reference)
+        # cf_template = torch.mul(self.CFscale, cf_template) + self.CFbias
+        cf_template = self.get_template_embedding(x1)
 
-        embedding_search = self.embedding_net(x2)
+        embedding_search = self.get_search_embedding(x2)
         match_map = self.match_corr(cf_template, embedding_search)
         return match_map
 
 
     def get_template_embedding(self, x):
-        embedding_reference = self.embedding_net(x)
+        embedding_reference = self.embedding_net_reference(x)
         cf_template = self.cf_block(embedding_reference)
         cf_template = torch.mul(self.CFscale, cf_template) + self.CFbias
-       
 
         return cf_template
 
 
     def get_search_embedding(self, x):
 
-        return self.embedding_net(x)
+        return self.embedding_net_search(x)
 
 
     def match_corr(self, embed_ref, embed_srch):
