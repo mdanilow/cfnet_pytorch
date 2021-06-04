@@ -99,8 +99,7 @@ def main(args):
         model = mdl.SiameseNet(mdl.VGG16EmbeddingNet_8c(), upscale=params.upscale,
                                corr_map_size=33, stride=4)
     elif params.model == 'CFnet':
-        model = mdl.CFnet(mdl.BaselineEmbeddingNet(), params,
-                               corr_map_size=33, stride=4)
+        model = mdl.CFnet(params, corr_map_size=33, stride=4)
 
     # Freeze all the indicated parameters
     for i, (name, parameter) in enumerate(model.named_parameters()):

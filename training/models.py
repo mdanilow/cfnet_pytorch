@@ -258,10 +258,10 @@ class CFblock(nn.Module):
 
 class CFnet(nn.Module):
 
-    def __init__(self, embedding_net, params, corr_map_size=33, stride=4):
+    def __init__(self, params, corr_map_size=33, stride=4):
         super(CFnet, self).__init__()
-        self.embedding_net_reference = embedding_net
-        self.embedding_net_search = embedding_net
+        self.embedding_net_reference = BaselineEmbeddingNet()
+        self.embedding_net_search = BaselineEmbeddingNet()
         self.match_batchnorm = nn.BatchNorm2d(1)
         # TODO compute this shape!
         self.ref_feature_sz = 49
