@@ -100,6 +100,9 @@ def main(args):
                                corr_map_size=33, stride=4)
     elif params.model == 'CFnet':
         model = mdl.CFnet(params, corr_map_size=33, stride=4)
+    elif params.model == 'SiameseNetCrop':
+        model = mdl.SiameseNetCrop(mdl.BaselineEmbeddingNet(), upscale=params.upscale,
+                               corr_map_size=33, stride=4)
 
     # Freeze all the indicated parameters
     for i, (name, parameter) in enumerate(model.named_parameters()):

@@ -41,6 +41,7 @@ def plot_training_results(results_filepath, output_path):
     #     linedata = file_lines[line_idx].split()
         
     plt.figure(figsize=(10, 10))
+    plt.xticks(epochs)
 
     plt.subplot(311)
     plt.plot(epochs, train_losses, 'orange', epochs, val_losses, 'b')
@@ -61,7 +62,7 @@ def plot_training_results(results_filepath, output_path):
     plt.ylabel('Center Error')
     plt.xlabel('epoch')
     plt.grid(True)
-    plt.legend(['train_auc', 'val_auc'])
+    plt.legend(['train', 'val'])
 
     plt.savefig(os.path.join(output_path, 'training_results.png'))
 

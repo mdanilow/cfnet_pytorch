@@ -24,6 +24,26 @@ device = torch.device("cuda") if torch.cuda.is_available() \
     else torch.device("cpu")
 
 
+class Conv2net(nn.Module):
+
+    def __init__(self, xavier_init=False):
+        super(Conv2net, self).__init__()
+        self.layers = nn.Squential(
+            nn.Conv2d(3, 96, kernel_size=11, stride=2, bias=True),
+            nn.BatchNorm2d(96),
+            nn.ReLu(),
+            nn.MaxPool2d(3, stride=2),
+
+            nn.Conv2d(96, 32, kernel_size=5, stride=1, groups=2, bias=True),
+            nn.BatchNorm2d(32),
+            nn.ReLu()
+        )
+
+
+    def forward(self, x):
+        return self.layers(x)
+
+
 class BaselineEmbeddingNet(nn.Module):
     """ Definition of the embedding network used in the baseline experiment of
     Bertinetto et al in https://arxiv.org/pdf/1704.06036.pdf.
@@ -31,7 +51,7 @@ class BaselineEmbeddingNet(nn.Module):
     of its hyperparameters changed.
     """
 
-    def __init__(self):
+    def __init__(self, xavier_init=False):
         super(BaselineEmbeddingNet, self).__init__()
         self.fully_conv = nn.Sequential(nn.Conv2d(3, 96, kernel_size=11,
                                                   stride=2, bias=True),
@@ -58,6 +78,10 @@ class BaselineEmbeddingNet(nn.Module):
                                         nn.Conv2d(384, 32, kernel_size=3,
                                                   stride=1, groups=2,
                                                   bias=True))
+        
+        if xavier_init:
+            for module in self.fully_conv:
+                weights_init(module)
 
     def forward(self, x):
         output = self.fully_conv(x)
@@ -157,6 +181,7 @@ class VGG16EmbeddingNet_8c(nn.Module):
                                         # Added ConvLayer, not in original model
                                         nn.Conv2d(256, 32, kernel_size=3,
                                                   stride=1, bias=True))
+
 
     def forward(self, x):
         output = self.fully_conv(x)
@@ -260,8 +285,8 @@ class CFnet(nn.Module):
 
     def __init__(self, params, corr_map_size=33, stride=4):
         super(CFnet, self).__init__()
-        self.embedding_net_reference = BaselineEmbeddingNet()
-        self.embedding_net_search = BaselineEmbeddingNet()
+        self.embedding_net_reference = BaselineEmbeddingNet(xavier_init=True)
+        self.embedding_net_search = BaselineEmbeddingNet(xavier_init=True)
         self.match_batchnorm = nn.BatchNorm2d(1)
         # TODO compute this shape!
         self.ref_feature_sz = 49
@@ -323,6 +348,106 @@ class CFnet(nn.Module):
     def get_search_embedding(self, x):
 
         return self.embedding_net_search(x)
+
+
+    def match_corr(self, embed_ref, embed_srch):
+        """ Matches the two embeddings using the correlation layer. As per usual
+        it expects input tensors of the form [B, C, H, W].
+
+        Args:
+            embed_ref: (torch.Tensor) The embedding of the reference image, or
+                the template of reference (the average of many embeddings for
+                example).
+            embed_srch: (torch.Tensor) The embedding of the search image.
+
+        Returns:
+            match_map: (torch.Tensor) The correlation between
+        """
+        b, c, h, w = embed_srch.shape
+        # Here the correlation layer is implemented using a trick with the
+        # conv2d function using groups in order to do the correlation with
+        # batch dimension. Basically we concatenate each element of the batch
+        # in the channel dimension for the search image (making it
+        # [1 x (B.C) x H' x W']) and setting the number of groups to the size of
+        # the batch. This grouped convolution/correlation is equivalent to a
+        # correlation between the two images, though it is not obvious.
+        match_map = F.conv2d(embed_srch.view(1, b * c, h, w),
+                             embed_ref, groups=b)
+        # Here we reorder the dimensions to get back the batch dimension.
+        match_map = match_map.permute(1, 0, 2, 3)
+        match_map = self.match_batchnorm(match_map)
+        if self.upscale:
+            match_map = F.interpolate(match_map, self.upsc_size, mode='bilinear',
+                                      align_corners=False)
+
+        return match_map
+
+
+class SiameseNetCrop(nn.Module):
+    """ The basic siamese network joining network, that takes the outputs of
+    two embedding branches and joins them applying a correlation operation.
+    Should always be used with tensors of the form [B x C x H x W], i.e.
+    you must always include the batch dimension.
+    """
+
+    def __init__(self, embedding_net, upscale=False, corr_map_size=33, stride=4):
+        super(SiameseNetCrop, self).__init__()
+        self.embedding_net = embedding_net
+        self.match_batchnorm = nn.BatchNorm2d(1)
+        self.crop_margin = 16
+
+        self.upscale = upscale
+        # TODO calculate automatically the final size and stride from the
+        # parameters of the branch
+        self.corr_map_size = corr_map_size
+        self.stride = stride
+        # Calculates the upscale size based on the correlation map size and
+        # the total stride of the network, so as to align the corners of the
+        # original and the upscaled one, which also aligns the centers.
+        self.upsc_size = (self.corr_map_size-1)*self.stride + 1
+        # The upscale_factor is the correspondence between a movement in the output
+        # feature map and the input images. So if a network has a total stride of 4
+        # and no deconvolutional or upscaling layers, a single pixel displacement
+        # in the output corresponds to a 4 pixels displacement in the input
+        # image. The easiest way to compensate this effect is to do a bilinear
+        # or bicubic upscaling.
+        if upscale:
+            self.upscale_factor = 1
+        else:
+            self.upscale_factor = self.stride
+
+
+    def forward(self, x1, x2):
+        """
+        Args:
+            x1 (torch.Tensor): The reference patch of dimensions [B, C, H, W].
+                Usually the shape is [8, 3, 127, 127].
+            x2 (torch.Tensor): The search region image of dimensions
+                [B, C, H', W']. Usually the shape is [8, 3, 255, 255].
+        Returns:
+            match_map (torch.Tensor): The score map for the pair. For the usual
+                input shapes, the output shape is [8, 1, 33, 33].
+        """
+        embedding_reference = self.get_template_embedding(x1)
+        embedding_search = self.get_search_embedding(x2)
+        match_map = self.match_corr(embedding_reference, embedding_search)
+        return match_map
+
+    # def get_embedding(self, x):
+    #     return self.embedding_net(x)
+
+    def get_template_embedding(self, x):
+        embedding_reference = self.embedding_net(x)
+        # print('precrop ref shape:', embedding_reference.shape)
+        embedding_reference = embedding_reference[:, :, self.crop_margin:-self.crop_margin, self.crop_margin:-self.crop_margin]
+        # print('ref shape:', embedding_reference.shape)
+
+        return embedding_reference
+
+
+    def get_search_embedding(self, x):
+        embedding_search = self.embedding_net(x)
+        return embedding_search
 
 
     def match_corr(self, embed_ref, embed_srch):
